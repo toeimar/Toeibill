@@ -12,24 +12,43 @@
 
 <!-- Firebase CDN (compat mode) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics-compat.js"></script>
 
 <script>
-  const firebaseConfig = {
-    apiKey: "AIzaSyA5l1QjPRMJEwTXedJFdK20nF7tr7sJuw4",
-    authDomain: "toeibill-5b980.firebaseapp.com",
-    projectId: "toeibill-5b980",
-    storageBucket: "toeibill-5b980.firebasestorage.app",
-    messagingSenderId: "192153937390",
-    appId: "1:192153937390:web:64084318710e94abe05aff",
-    measurementId: "G-XX08T7S22R"
-  };
-  var db = null;
+  let db = null;
+  let auth = null;
+  let appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
   try {
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+        apiKey: "AIzaSyA5l1QjPRMJEwTXedJFdK20nF7tr7sJuw4",
+        authDomain: "toeibill-5b980.firebaseapp.com",
+        projectId: "toeibill-5b980",
+        storageBucket: "toeibill-5b980.firebasestorage.app",
+        messagingSenderId: "192153937390",
+        appId: "1:192153937390:web:64084318710e94abe05aff",
+        measurementId: "G-XX08T7S22R"
+    };
+    
     firebase.initializeApp(firebaseConfig);
     db = firebase.firestore();
-    firebase.analytics();
+    auth = firebase.auth();
+    if (typeof firebase.analytics === 'function') firebase.analytics();
+
+    // เริ่มต้นระบบยืนยันตัวตน เพื่อปลดล็อกสิทธิ์ให้สามารถเซฟลิงก์แชร์ลง Cloud ได้สำเร็จ
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await auth.signInWithCustomToken(__initial_auth_token);
+        } else {
+          await auth.signInAnonymously();
+        }
+      } catch(e) { console.log('Auth Error', e); }
+    };
+    initAuth();
+
   } catch(e) {
     console.log("Firebase Init Error (Offline mode fallback):", e);
   }
@@ -370,7 +389,7 @@ tbody tr:hover td { background:var(--subtle); }
 .a4-sig-space { height: 45px; display: flex; align-items: flex-end; justify-content: center; position:relative; }
 .a4-sig-space img { max-height: 50px; max-width: 120px; object-fit: contain; mix-blend-mode: multiply; position:absolute; bottom:2px; }
 .a4-sig-label { border-top: 1px solid #cbd5e1; padding-top: 6px; font-size: 9pt; }
-.a4-sig-date-val { margin-bottom: 4px; font-size: 9pt; color: #0f172a; }
+.a4-sig-date-val { position: absolute; bottom: 2px; left: 0; right: 0; text-align: center; font-size: 9pt; color: #0f172a; }
 .a4-footer-sys { text-align: right; font-size: 7.5pt; color: #cbd5e1; margin-top:20px; }
 
 /* RESTORED FEATURES: Payment Page (QR) and Stamp */
@@ -1480,8 +1499,8 @@ function openDocPreview(doc) {
     <div class="modal-ftr">
       <button class="btn btn-ghost" onclick="closeModal()">ปิด</button>
       ${!doc.isDraft
-        ?`<button class="btn btn-ghost" style="color:var(--accent-h);border-color:var(--accent)" onclick="shareDocOffline('${doc.id}')">🔗 สร้างลิงก์แชร์</button>
-          <button id="btn-dl-pdf" class="btn btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="downloadPDF('${doc.id}')">📄 แชร์/โหลด PDF</button>
+        ?`<button class="btn btn-ghost" style="color:var(--accent-h);border-color:var(--accent)" onclick="shareDoc('${doc.id}')">🔗 สร้างลิงก์แชร์</button>
+          <button id="btn-dl-pdf" class="btn btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="downloadPDF('${doc.id}')">📄 โหลด PDF</button>
           <button class="btn btn-primary" onclick="printDoc('${doc.id}')">🖨️ พิมพ์</button>`
         :`<button class="btn" style="background:${m.hex};color:#fff" onclick="closeModal();saveDraft()">💾 บันทึก</button>`}
     </div>`,true);
@@ -1496,7 +1515,7 @@ function printDoc(id) {
 }
 
 /* ═══════════════════════════════════════
-   DOWNLOAD & SHARE PDF FUNCTION (MOBILE + PC 100%)
+   DOWNLOAD PDF FUNCTION (รองรับมือถือ 100%)
 ═══════════════════════════════════════ */
 function downloadPDF(id) {
   const btn = document.getElementById('btn-dl-pdf');
@@ -1504,7 +1523,7 @@ function downloadPDF(id) {
 
   const doc = (DB.documents || []).find(d => d.id === id) || window.currentPubDoc;
   if(!doc) {
-      if(btn) { btn.disabled = false; btn.innerHTML = '📄 แชร์/โหลด PDF'; }
+      if(btn) { btn.disabled = false; btn.innerHTML = '📄 โหลด PDF'; }
       return;
   }
   toast('กำลังเตรียมไฟล์ PDF กรุณารอสักครู่...', 'warn');
@@ -1544,48 +1563,56 @@ function downloadPDF(id) {
     jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
   };
   
-  // สร้างไฟล์ PDF เป็น Blob
-  html2pdf().set(opt).from(tempDiv).output('blob').then(function(pdfBlob) {
+  // สร้างไฟล์ PDF เป็น Blob 
+  html2pdf().set(opt).from(tempDiv).output('blob').then(async function(pdfBlob) {
     document.body.removeChild(tempDiv);
-    if(btn) { btn.disabled = false; btn.innerHTML = '📄 แชร์/โหลด PDF'; }
+    if(btn) { btn.disabled = false; btn.innerHTML = '📄 โหลด PDF'; }
     
     const file = new File([pdfBlob], `${doc.id}.pdf`, { type: 'application/pdf' });
     
-    // เรียกใช้เมนู Share ของระบบ (มือถือ iOS/Android จะเด้งเมนูให้ส่งเข้า LINE/FB ได้เลย)
-    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator.share({
-            title: `เอกสาร ${doc.id}`,
-            files: [file]
-        }).then(() => toast('แชร์ PDF สำเร็จ!', 'success')).catch((e) => {
-            // หากผู้ใช้กดยกเลิก หรือเบราว์เซอร์ไม่ยอมให้แชร์ข้ามแอป ให้ดาวน์โหลดลงเครื่องทันที
+    // ตรวจสอบ WebView เพื่อป้องกันการแชร์ไม่สำเร็จบนแอป LINE/Facebook
+    const isWebView = /Line|FBAN|FBAV|Instagram/i.test(navigator.userAgent);
+    
+    try {
+        if (navigator.canShare && navigator.canShare({ files: [file] }) && !isWebView) {
+            await navigator.share({
+                title: `เอกสาร ${doc.id}`,
+                files: [file]
+            });
+            toast('แชร์ PDF สำเร็จ!', 'success');
+        } else {
+            throw new Error("Share not supported or in WebView");
+        }
+    } catch (err) {
+        // หากแชร์ไม่ได้ ให้บังคับดาวน์โหลดเปิดแท็บใหม่แทน
+        if (err.name !== 'AbortError') {
             saveBlobAsFile(pdfBlob, `${doc.id}.pdf`);
-        });
-    } else {
-        // สำหรับระบบ PC หรือ เบราว์เซอร์ที่ไม่รองรับ Share Sheet
-        saveBlobAsFile(pdfBlob, `${doc.id}.pdf`);
+        }
     }
   }).catch(e => {
       if(document.body.contains(tempDiv)) document.body.removeChild(tempDiv);
-      if(btn) { btn.disabled = false; btn.innerHTML = '📄 แชร์/โหลด PDF'; }
+      if(btn) { btn.disabled = false; btn.innerHTML = '📄 โหลด PDF'; }
       toast('เกิดข้อผิดพลาดในการสร้าง PDF', 'warn');
-      console.error(e);
   });
 }
 
 function saveBlobAsFile(blob, fileName) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
+    a.style.display = 'none';
     a.href = url;
     a.download = fileName;
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast('ดาวน์โหลด PDF สำเร็จ!', 'success');
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 100);
+    toast('ดาวน์โหลด PDF ลงเครื่องสำเร็จ! (สามารถกดแชร์ต่อจากไฟล์ที่โหลดได้เลย)', 'success');
 }
 
 /* ═══════════════════════════════════════
-   SHARE LINK (ย่อลิงก์ด้วย TinyURL ให้สั้นกริบ)
+   SHARE LINK (เชื่อม Cloud + ย่อลิงก์ TinyURL)
 ═══════════════════════════════════════ */
 function showShareModal(url) {
   openModal(`
@@ -1595,10 +1622,10 @@ function showShareModal(url) {
     </div>
     <div class="modal-body" style="text-align:center; padding-top:10px;">
       <div style="background:var(--green-s); color:var(--green); padding:12px; border-radius:8px; margin-bottom:24px; font-size:13.5px; font-weight:600; text-align:left;">
-        ✅ สร้างลิงก์แชร์สำเร็จ! <br><span style="font-weight:400; color:var(--text-2);">ลูกค้าสามารถเปิดลิงก์นี้บนมือถือ และดาวน์โหลด PDF ได้ด้วยตนเอง</span>
+        ✅ สร้างลิงก์แชร์สำเร็จ! โลโก้และลายเซ็นมาครบ<br><span style="font-weight:400; color:var(--text-2);">ลูกค้าสามารถเปิดลิงก์นี้บนมือถือ และดาวน์โหลด PDF ได้ด้วยตนเอง</span>
       </div>
       <div style="display:flex; gap:8px; margin-bottom:24px;">
-        <input type="text" class="form-control" value="${url}" id="share-url-input" readonly style="background:#fff; color:#000; font-family:monospace; font-size:14px; padding: 10px;">
+        <input type="text" class="form-control" value="${url}" id="share-url-input" readonly style="background:#fff; color:#000; font-family:monospace; font-size:13px; padding: 10px;">
         <button class="btn btn-primary" onclick="copyShareUrl()" style="white-space:nowrap; padding: 0 14px;">คัดลอก</button>
         <button class="btn" onclick="shareToLine('${url}')" style="background:#00B900; color:#fff; white-space:nowrap; padding: 0 16px; border: none;">LINE</button>
       </div>
@@ -1623,28 +1650,134 @@ function shareToLine(url) {
   window.open(`https://line.me/R/msg/text/?${text}`, '_blank');
 }
 
-// ผสมผสาน LZ-String Offline + TinyURL API 
-async function shareDocOffline(id) {
+async function shareDoc(id) {
   const doc = DB.documents.find(d => d.id === id);
   if (!doc) return;
   const cus  = getCusFromDoc(doc);
-  
-  // ตัดรูปภาพใน URL ทิ้ง เพื่อป้องกันข้อมูลขนาดเกินขีดจำกัด (รูปจะกลายเป็นข้อความแทน)
-  const stripComp = { ...DB.settings, logo: '', signature: '', qrCode: '' }; 
+  const comp = { ...DB.settings }; // เก็บโลโก้ ลายเซ็นต์ QR แบบเต็มๆ
 
+  toast('กำลังอัปโหลดเอกสารขึ้นระบบ กรุณารอสักครู่...', 'warn');
+  const baseUrl = window.location.href.split('?')[0].split('#')[0];
+
+  // 1. เขียนลง Firebase ตามสิทธิ์ Canvas เพื่อให้ได้ลิงก์สั้นและภาพครบถ้วน 100%
+  if (db !== null && auth && auth.currentUser) {
+    try {
+      const randomStr = Math.random().toString(36).substring(2, 6);
+      const shareId = `${doc.id.toLowerCase().replace(/[^a-z0-9]/g, '')}-${randomStr}`;
+      
+      const docPath = `artifacts/${appId}/public/data/shared_docs`;
+      await db.collection(docPath).doc(shareId).set({ doc, cus, comp, createdAt: Date.now() });
+      
+      const url = `${baseUrl}?share=${shareId}`;
+      showShareModal(url);
+      return; 
+    } catch(e) {
+      console.warn("Firebase fallback...", e);
+    }
+  }
+
+  // 2. แผนสำรองแบบแข็งแกร่ง (กรณี Cloud มีปัญหา)
   try {
-    toast('กำลังสร้างลิงก์แบบสั้น (Short Link)...', 'warn');
-    const baseUrl = window.location.href.split('?')[0].split('#')[0];
-    const encodedData = encodeDataToURL({ doc, cus, comp: stripComp });
+    const encodedData = encodeDataToURL({ doc, cus, comp });
     const longUrl = `${baseUrl}?pub=${encodedData}`;
-    
-    // ย่อลิงก์ให้สั้นลงด้วย TinyURL
     const shortUrl = await shortenUrl(longUrl);
     showShareModal(shortUrl);
   } catch(e) { 
-    console.error(e);
-    toast('เกิดข้อผิดพลาด กรุณาใช้แชร์เป็น PDF แทน', 'warn'); 
+    toast('เกิดข้อผิดพลาด กรุณาแชร์แบบเป็นไฟล์ PDF แทน', 'warn'); 
   }
+}
+
+/* ═══════════════════════════════════════
+   SETTINGS
+═══════════════════════════════════════ */
+function renderSettings() {
+  const s = DB.settings;
+  return `
+  <div class="g2 fu">
+    <div class="card">
+      <span class="sec-title">🏢 ข้อมูลบริษัท</span>
+      <div class="g2" style="margin-bottom:0">
+        <div class="form-group">
+          <label class="form-label">โลโก้บริษัท</label>
+          ${s.logo?`<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px;margin-bottom:8px"><img id="logo-prev" src="${s.logo}" style="width:100%;height:56px;object-fit:contain"></div>`:`<div id="logo-prev-wrap"></div>`}
+          <input type="file" accept="image/*" class="form-control" style="padding:8px;font-size:11.5px" onchange="uploadImg(this,'logo','logo-prev')">
+        </div>
+        <div class="form-group">
+          <label class="form-label">ลายเซ็น</label>
+          ${s.signature?`<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px;margin-bottom:8px"><img id="sig-prev" src="${s.signature}" style="width:100%;height:56px;object-fit:contain"></div>`:`<div id="sig-prev-wrap"></div>`}
+          <input type="file" accept="image/*" class="form-control" style="padding:8px;font-size:11.5px" onchange="uploadImg(this,'sig','sig-prev')">
+        </div>
+      </div>
+      <div class="form-group"><label class="form-label">ชื่อบริษัท / ร้านค้า</label><input id="s-name" class="form-control" value="${s.companyName}"></div>
+      <div class="form-group"><label class="form-label">เลขผู้เสียภาษี</label><input id="s-tax" class="form-control" value="${s.taxId}"></div>
+      <div class="form-group"><label class="form-label">ที่อยู่</label><textarea id="s-addr" class="form-control" rows="3">${s.address}</textarea></div>
+      <div class="form-group"><label class="form-label">ชื่อผู้ออกเอกสาร</label><input id="s-issuer" class="form-control" value="${s.issuerName}"></div>
+    </div>
+    <div>
+      <div class="card">
+        <span class="sec-title">🏦 ข้อมูลธนาคาร & QR Code</span>
+        <div class="form-group">
+          <label class="form-label">QR Code รับเงิน</label>
+          ${s.qrCode?`<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px;width:100px;margin-bottom:8px"><img id="qr-prev" src="${s.qrCode}" style="width:100%;height:90px;object-fit:contain"></div>`:`<div id="qr-prev-wrap"></div>`}
+          <input type="file" accept="image/*" class="form-control" style="padding:8px;font-size:11.5px" onchange="uploadImg(this,'qr','qr-prev')">
+        </div>
+        <div class="g2" style="margin-bottom:0">
+          <div class="form-group"><label class="form-label">ชื่อธนาคาร</label><input id="s-bname" class="form-control" value="${s.bankName}"></div>
+          <div class="form-group"><label class="form-label">เลขบัญชี</label><input id="s-bacc" class="form-control" value="${s.bankAcc}"></div>
+          <div class="form-group"><label class="form-label">สาขา</label><input id="s-bbranch" class="form-control" value="${s.bankBranch}"></div>
+          <div class="form-group"><label class="form-label">ชื่อบัญชี</label><input id="s-bowner" class="form-control" value="${s.bankOwner}"></div>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center" onclick="saveSettings()">💾 บันทึกการตั้งค่า</button>
+    </div>
+  </div>`;
+}
+
+function uploadImg(input, key, imgId) {
+  if(!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  const r = new FileReader();
+  r.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX_WIDTH = 300; 
+      let width = img.width;
+      let height = img.height;
+      if (width > MAX_WIDTH) {
+        height = Math.round((height * MAX_WIDTH) / width);
+        width = MAX_WIDTH;
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+
+      DB.settings[key === 'logo' ? 'logo' : key === 'sig' ? 'signature' : 'qrCode'] = dataUrl;
+      let el = document.getElementById(imgId);
+      if(!el){
+        const wrap = document.getElementById(imgId + '-wrap');
+        if(wrap) wrap.innerHTML = `<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px;margin-bottom:8px"><img id="${imgId}" src="${dataUrl}" style="width:100%;height:56px;object-fit:contain"></div>`;
+      } else { el.src = dataUrl; }
+    };
+    img.src = e.target.result;
+  };
+  r.readAsDataURL(file);
+}
+
+function saveSettings() {
+  const s = DB.settings;
+  s.companyName = document.getElementById('s-name').value;
+  s.taxId = document.getElementById('s-tax').value;
+  s.address = document.getElementById('s-addr').value;
+  s.issuerName = document.getElementById('s-issuer').value;
+  s.bankName = document.getElementById('s-bname').value;
+  s.bankAcc = document.getElementById('s-bacc').value;
+  s.bankBranch = document.getElementById('s-bbranch').value;
+  s.bankOwner = document.getElementById('s-bowner').value;
+  saveDB(); toast('บันทึกการตั้งค่าแล้ว', 'success'); renderNav();
 }
 
 /* ═══════════════════════════════════════
@@ -1686,9 +1819,39 @@ function showPublicViewer(data) {
 }
 
 /* ─── Detect share/pub params ─── */
+const _shareId = new URLSearchParams(location.search).get('share');
 const _pub = new URLSearchParams(location.search).get('pub');
 
-if (_pub) {
+if (_shareId) {
+  // ดึงจาก Firebase
+  document.getElementById('app-root').style.display = 'none';
+  document.body.insertAdjacentHTML('beforeend', `<div class="share-loading" id="share-loading"> <div class="share-loading-inner"> <div class="share-loading-spinner"></div> <div>กำลังโหลดเอกสาร...</div> </div> </div>`);
+  
+  const loadSharedDoc = () => {
+     if (db !== null) {
+         const docPath = `artifacts/${appId}/public/data/shared_docs`;
+         db.collection(docPath).doc(_shareId).get().then(snap => {
+             showPublicViewer(snap.exists ? snap.data() : null);
+         }).catch(err => {
+             console.error(err); showPublicViewer(null);
+         });
+      } else {
+         setTimeout(loadSharedDoc, 500);
+      }
+  };
+
+  // รอ Auth ให้เสร็จก่อนจึงจะดึงข้อมูล
+  if (auth && !auth.currentUser) {
+      window.pendingShareId = _shareId;
+      const unsubscribe = auth.onAuthStateChanged((user) => {
+          if (user) { unsubscribe(); loadSharedDoc(); }
+      });
+  } else if (auth && auth.currentUser) {
+      loadSharedDoc();
+  } else { showPublicViewer(null); }
+
+} else if (_pub) {
+  // ดึงจาก URL ล้วน
   try { 
       const data = decodeDataFromURL(_pub);
       showPublicViewer(data); 
