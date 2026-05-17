@@ -8,7 +8,7 @@
 
 <!-- Libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script> <!-- สำหรับบีบอัดลิงก์แชร์ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
 
 <!-- Firebase CDN (compat mode) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -269,7 +269,7 @@ tbody tr:hover td { background:var(--subtle); }
 .alert-warn { background:var(--yellow-s); border:1px solid rgba(245,158,11,.2); color:var(--yellow); }
 
 /* ═══════════════════════════════════
-   A4 DOCUMENT (Redesigned matching Image 100%)
+   A4 DOCUMENT
 ═══════════════════════════════════ */
 .a4-bg { background:#525659; }
 .a4-wrapper { width: 210mm; margin:0 auto; }
@@ -587,13 +587,16 @@ tbody tr:hover td { background:var(--subtle); }
 const money = n => Number(n).toLocaleString('th-TH', {minimumFractionDigits:2, maximumFractionDigits:2});
 const genId = p => { const d = new Date(); return p + d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(Math.floor(Math.random()*1000)).padStart(3,'0'); };
 
-// แก้ไขฟังก์ชันวันที่ให้อิงตาม Local Time เครื่องเสมอ แบบ DD/MM/YYYY ไม่เคลื่อน
+// แก้ไขฟังก์ชันวันที่ให้อิงตามเครื่องเป๊ะๆ ไม่คลาดเคลื่อน
 const todayStr = () => { 
   const d = new Date();
-  return d.toLocaleDateString('en-GB'); // ให้รูปแบบ DD/MM/YYYY อัตโนมัติ ตรงเป๊ะ
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear(); // เช่น 2026
+  return `${day}/${month}/${year}`; 
 };
 
-// URL Compression (LZ-String) บีบอัดลิงก์ให้แชร์ได้ 100% ไม่พัง
+// ใช้ LZ-String สำหรับบีบอัดข้อมูลแบบแข็งแกร่ง เปิดใน URL ได้ 100%
 const encodeDataToURL = (dataObj) => {
     try {
         const jsonStr = JSON.stringify(dataObj);
@@ -613,6 +616,23 @@ const decodeDataFromURL = (lzStr) => {
         return null;
     }
 };
+
+/* ═══════════════════════════════════════
+   SHORT URL API (สร้างลิงก์สั้นผ่าน TinyURL)
+═══════════════════════════════════════ */
+async function shortenUrl(longUrl) {
+    try {
+        // ใช้ API จาก TinyURL เพื่อให้ได้ลิงก์ที่สั้นกริบและไม่โดนบล็อก
+        const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`);
+        if(res.ok) {
+            const text = await res.text();
+            if(text && text.startsWith('http')) return text;
+        }
+    } catch(e) {
+        console.error('TinyURL Error', e);
+    }
+    return longUrl; // หากดึงไม่สำเร็จ จะแสดงลิงก์แบบยาวเป็น Fallback
+}
 
 /* ═══════════════════════════════════════
    NAV CONFIG
@@ -971,7 +991,7 @@ function renderDocList(type) {
       <td style="font-family:var(--font-mono);font-weight:600">฿${money(doc.total)}</td>
       <td>${statusBadge(doc.status,type)}</td>
       <td><div style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm" onclick="previewDoc('${doc.id}')">ดู / โหลด</button>
+        <button class="btn btn-ghost btn-sm" onclick="previewDoc('${doc.id}')">เปิดดู</button>
         <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="delDoc('${doc.id}')">ลบ</button>
       </div></td></tr>`;
   }).join('')||`<tr><td colspan="6"><div class="empty"><span class="empty-icon">📄</span><div class="empty-text">ยังไม่มีเอกสาร${m.title}</div></div></td></tr>`;
@@ -1461,7 +1481,7 @@ function openDocPreview(doc) {
       <button class="btn btn-ghost" onclick="closeModal()">ปิด</button>
       ${!doc.isDraft
         ?`<button class="btn btn-ghost" style="color:var(--accent-h);border-color:var(--accent)" onclick="shareDocOffline('${doc.id}')">🔗 สร้างลิงก์แชร์</button>
-          <button id="btn-dl-pdf" class="btn btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="downloadPDF('${doc.id}')">📄 โหลด PDF</button>
+          <button id="btn-dl-pdf" class="btn btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="downloadPDF('${doc.id}')">📄 แชร์/โหลด PDF</button>
           <button class="btn btn-primary" onclick="printDoc('${doc.id}')">🖨️ พิมพ์</button>`
         :`<button class="btn" style="background:${m.hex};color:#fff" onclick="closeModal();saveDraft()">💾 บันทึก</button>`}
     </div>`,true);
@@ -1476,17 +1496,96 @@ function printDoc(id) {
 }
 
 /* ═══════════════════════════════════════
-   DOWNLOAD PDF FUNCTION (รองรับมือถือ 100%)
+   DOWNLOAD & SHARE PDF FUNCTION (MOBILE + PC 100%)
 ═══════════════════════════════════════ */
 function downloadPDF(id) {
-  // บนระบบมือถือเบราว์เซอร์ส่วนใหญ่จะรองรับการปริ้นเป็น PDF (Save as PDF) ทันที
-  // ซึ่งการสั่ง window.print() จะเสถียรที่สุด 100% ไม่มีปัญหาการแสดงผล
-  toast('กรุณาเลือก "บันทึกเป็น PDF" หรือ "Save as PDF" ในหน้าจอถัดไป', 'success');
-  setTimeout(() => { printDoc(id); }, 1500);
+  const btn = document.getElementById('btn-dl-pdf');
+  if(btn) { btn.disabled = true; btn.innerHTML = '⏳ กำลังสร้าง...'; }
+
+  const doc = (DB.documents || []).find(d => d.id === id) || window.currentPubDoc;
+  if(!doc) {
+      if(btn) { btn.disabled = false; btn.innerHTML = '📄 แชร์/โหลด PDF'; }
+      return;
+  }
+  toast('กำลังเตรียมไฟล์ PDF กรุณารอสักครู่...', 'warn');
+  
+  const cus = window.currentPubCus || null;
+  const comp = window.currentPubComp || null;
+  
+  // ซ่อน DOM พิเศษเพื่อเรนเดอร์ PDF
+  const tempDiv = document.createElement('div');
+  tempDiv.style.position = 'absolute';
+  tempDiv.style.left = '-9999px';
+  tempDiv.style.top = '0';
+  tempDiv.style.width = '210mm';
+  tempDiv.innerHTML = `<div class="pdf-export-wrap">${genA4HTML(doc, cus, comp)}</div>`;
+  document.body.appendChild(tempDiv);
+  
+  const style = document.createElement('style');
+  style.innerHTML = `
+    .pdf-export-wrap .a4-page {
+        margin: 0 !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        transform: none !important;
+        page-break-after: always;
+    }
+    .pdf-export-wrap .a4-page:last-child {
+        page-break-after: auto;
+    }
+  `;
+  tempDiv.appendChild(style);
+
+  const opt = {
+    margin:       0,
+    filename:     `${doc.id}.pdf`,
+    image:        { type: 'jpeg', quality: 1 },
+    html2canvas:  { scale: 2, useCORS: true, windowWidth: 794 }, // A4 width
+    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+  };
+  
+  // สร้างไฟล์ PDF เป็น Blob
+  html2pdf().set(opt).from(tempDiv).output('blob').then(function(pdfBlob) {
+    document.body.removeChild(tempDiv);
+    if(btn) { btn.disabled = false; btn.innerHTML = '📄 แชร์/โหลด PDF'; }
+    
+    const file = new File([pdfBlob], `${doc.id}.pdf`, { type: 'application/pdf' });
+    
+    // เรียกใช้เมนู Share ของระบบ (มือถือ iOS/Android จะเด้งเมนูให้ส่งเข้า LINE/FB ได้เลย)
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({
+            title: `เอกสาร ${doc.id}`,
+            files: [file]
+        }).then(() => toast('แชร์ PDF สำเร็จ!', 'success')).catch((e) => {
+            // หากผู้ใช้กดยกเลิก หรือเบราว์เซอร์ไม่ยอมให้แชร์ข้ามแอป ให้ดาวน์โหลดลงเครื่องทันที
+            saveBlobAsFile(pdfBlob, `${doc.id}.pdf`);
+        });
+    } else {
+        // สำหรับระบบ PC หรือ เบราว์เซอร์ที่ไม่รองรับ Share Sheet
+        saveBlobAsFile(pdfBlob, `${doc.id}.pdf`);
+    }
+  }).catch(e => {
+      if(document.body.contains(tempDiv)) document.body.removeChild(tempDiv);
+      if(btn) { btn.disabled = false; btn.innerHTML = '📄 แชร์/โหลด PDF'; }
+      toast('เกิดข้อผิดพลาดในการสร้าง PDF', 'warn');
+      console.error(e);
+  });
+}
+
+function saveBlobAsFile(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('ดาวน์โหลด PDF สำเร็จ!', 'success');
 }
 
 /* ═══════════════════════════════════════
-   SHARE LINK (OFFLINE URL ENCODING - เปิดได้ 100%)
+   SHARE LINK (ย่อลิงก์ด้วย TinyURL ให้สั้นกริบ)
 ═══════════════════════════════════════ */
 function showShareModal(url) {
   openModal(`
@@ -1496,10 +1595,10 @@ function showShareModal(url) {
     </div>
     <div class="modal-body" style="text-align:center; padding-top:10px;">
       <div style="background:var(--green-s); color:var(--green); padding:12px; border-radius:8px; margin-bottom:24px; font-size:13.5px; font-weight:600; text-align:left;">
-        ✅ สร้างลิงก์แชร์สำเร็จ! <br><span style="font-weight:400; color:var(--text-2);">ระบบฝังข้อมูลเอกสารลงในลิงก์แล้ว ลูกค้าเปิดดูบนมือถือและบันทึก PDF ได้ทันที</span>
+        ✅ สร้างลิงก์แชร์สำเร็จ! <br><span style="font-weight:400; color:var(--text-2);">ลูกค้าสามารถเปิดลิงก์นี้บนมือถือ และดาวน์โหลด PDF ได้ด้วยตนเอง</span>
       </div>
       <div style="display:flex; gap:8px; margin-bottom:24px;">
-        <input type="text" class="form-control" value="${url}" id="share-url-input" readonly style="background:#fff; color:#000; font-family:monospace; font-size:13px; padding: 10px;">
+        <input type="text" class="form-control" value="${url}" id="share-url-input" readonly style="background:#fff; color:#000; font-family:monospace; font-size:14px; padding: 10px;">
         <button class="btn btn-primary" onclick="copyShareUrl()" style="white-space:nowrap; padding: 0 14px;">คัดลอก</button>
         <button class="btn" onclick="shareToLine('${url}')" style="background:#00B900; color:#fff; white-space:nowrap; padding: 0 16px; border: none;">LINE</button>
       </div>
@@ -1520,25 +1619,31 @@ function copyShareUrl() {
 }
 
 function shareToLine(url) {
-  const text = encodeURIComponent('เอกสารสำหรับคุณ สามารถเปิดดูและดาวน์โหลด PDF ได้ที่นี่: \n\n' + url);
+  const text = encodeURIComponent('เอกสารสำหรับคุณ สามารถเปิดดูและดาวน์โหลดไฟล์ PDF ได้ที่นี่: \n\n' + url);
   window.open(`https://line.me/R/msg/text/?${text}`, '_blank');
 }
 
-// ใช้ Share Offline 100% (บีบอัดข้อมูลแบบ LZString ใส่ลิงก์โดยตรง ไม่ต้องผ่านฐานข้อมูล)
-function shareDocOffline(id) {
+// ผสมผสาน LZ-String Offline + TinyURL API 
+async function shareDocOffline(id) {
   const doc = DB.documents.find(d => d.id === id);
   if (!doc) return;
   const cus  = getCusFromDoc(doc);
-  // ตัดรูปภาพออกใน URL ป้องกันลิงก์ยาวเกินไปและบัก (รูปภาพให้ลูกค้าดูแบบเนมเพลตแทน)
+  
+  // ตัดรูปภาพใน URL ทิ้ง เพื่อป้องกันข้อมูลขนาดเกินขีดจำกัด (รูปจะกลายเป็นข้อความแทน)
   const stripComp = { ...DB.settings, logo: '', signature: '', qrCode: '' }; 
 
   try {
+    toast('กำลังสร้างลิงก์แบบสั้น (Short Link)...', 'warn');
     const baseUrl = window.location.href.split('?')[0].split('#')[0];
     const encodedData = encodeDataToURL({ doc, cus, comp: stripComp });
-    const url = `${baseUrl}?pub=${encodedData}`;
-    showShareModal(url);
+    const longUrl = `${baseUrl}?pub=${encodedData}`;
+    
+    // ย่อลิงก์ให้สั้นลงด้วย TinyURL
+    const shortUrl = await shortenUrl(longUrl);
+    showShareModal(shortUrl);
   } catch(e) { 
-    toast('เอกสารมีรายละเอียดเยอะเกินไป กรุณาใช้การเซฟ PDF แทน', 'warn'); 
+    console.error(e);
+    toast('เกิดข้อผิดพลาด กรุณาใช้แชร์เป็น PDF แทน', 'warn'); 
   }
 }
 
@@ -1546,7 +1651,7 @@ function shareDocOffline(id) {
 PUBLIC VIEWER (Web View for Customer)
 ═══════════════════════════════════════ */
 function showPublicViewer(data) {
-  if (!data) { document.body.innerHTML = `<div style="padding:60px;text-align:center;font-family:'IBM Plex Sans Thai',sans-serif;color:#666"><h2>⚠️ ลิงก์เอกสารไม่ถูกต้อง</h2><p>ลิงก์อาจถูกตัดหรือมีปัญหาในการคัดลอก กรุณาติดต่อผู้ส่งเอกสารใหม่อีกครั้ง</p></div>`; return; }
+  if (!data) { document.body.innerHTML = `<div style="padding:60px;text-align:center;font-family:'IBM Plex Sans Thai',sans-serif;color:#666"><h2>⚠️ ลิงก์เอกสารไม่ถูกต้อง</h2><p>ลิงก์อาจถูกตัดหรือหมดอายุ กรุณาติดต่อผู้ส่งเอกสารอีกครั้ง</p></div>`; return; }
   const { doc, cus, comp } = data;
   
   // เก็บ State ไว้ให้ฟังก์ชัน Print และ Download PDF ดึงไปใช้
@@ -1561,12 +1666,12 @@ function showPublicViewer(data) {
   const brandHtml = comp.logo ? `<img src="${comp.logo}">` : `<div class="pub-brand-text">${comp.companyName}</div>`;
   const actionHtml = doc.status === 'unpaid' 
     ? `<div style="display:flex; gap:10px; width: 100%;">
-         <button class="pub-btn-primary" onclick="downloadPDF('${doc.id}')" style="background:#14b8a6; color:#fff; flex:1; justify-content:center; white-space:nowrap;">📄 โหลด PDF</button>
+         <button id="btn-dl-pdf" class="pub-btn-primary" onclick="downloadPDF('${doc.id}')" style="background:#14b8a6; color:#fff; flex:1; justify-content:center; white-space:nowrap;">📄 โหลด PDF</button>
          <button class="pub-btn-primary" onclick="printDoc('${doc.id}')" style="background:#0f172a; color:#fff; flex:1; justify-content:center; white-space:nowrap;">🖨️ พิมพ์</button>
        </div>` 
     : `<div style="display:flex; align-items:center; gap:15px; flex-wrap:wrap; justify-content:center;">
          <div style="color:#22c55e;font-weight:700;font-size:15px; background:#f0fdf4; padding:8px 16px; border-radius:8px; border:1px solid #bbf7d0; white-space:nowrap;">ชำระเงินแล้ว ✓</div>
-         <button class="pub-btn-primary" onclick="downloadPDF('${doc.id}')" style="background:#14b8a6; color:#fff; white-space:nowrap;">📄 โหลด PDF</button>
+         <button id="btn-dl-pdf" class="pub-btn-primary" onclick="downloadPDF('${doc.id}')" style="background:#14b8a6; color:#fff; white-space:nowrap;">📄 โหลด PDF</button>
          <button class="pub-btn-primary" onclick="printDoc('${doc.id}')" style="background:#0f172a; color:#fff; white-space:nowrap;">🖨️ พิมพ์</button>
        </div>`;
 
