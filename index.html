@@ -6,6 +6,35 @@
 <title>BizFlow — ระบบบัญชีออนไลน์ (พร้อมใช้งาน)</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 
+<!-- Libraries -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script> <!-- สำหรับบีบอัดลิงก์แชร์ -->
+
+<!-- Firebase CDN (compat mode) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics-compat.js"></script>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyA5l1QjPRMJEwTXedJFdK20nF7tr7sJuw4",
+    authDomain: "toeibill-5b980.firebaseapp.com",
+    projectId: "toeibill-5b980",
+    storageBucket: "toeibill-5b980.firebasestorage.app",
+    messagingSenderId: "192153937390",
+    appId: "1:192153937390:web:64084318710e94abe05aff",
+    measurementId: "G-XX08T7S22R"
+  };
+  var db = null;
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+    firebase.analytics();
+  } catch(e) {
+    console.log("Firebase Init Error (Offline mode fallback):", e);
+  }
+</script>
+
 <style>
 :root {
   --bg:         #0d0f14;
@@ -553,28 +582,36 @@ tbody tr:hover td { background:var(--subtle); }
 
 <script>
 /* ═══════════════════════════════════════
-   HELPERS & URL ENCODING (แก้บั๊กภาษาไทยใน URL)
+   HELPERS & URL ENCODING
 ═══════════════════════════════════════ */
 const money = n => Number(n).toLocaleString('th-TH', {minimumFractionDigits:2, maximumFractionDigits:2});
 const genId = p => { const d = new Date(); return p + d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(Math.floor(Math.random()*1000)).padStart(3,'0'); };
 
-// แก้ไขฟังก์ชันวันที่ให้แสดงตรงกับ Local Time เสมอ
+// แก้ไขฟังก์ชันวันที่ให้อิงตาม Local Time เครื่องเสมอ แบบ DD/MM/YYYY ไม่เคลื่อน
 const todayStr = () => { 
-  const d = new Date(); 
-  const day = String(d.getDate()).padStart(2,'0');
-  const month = String(d.getMonth()+1).padStart(2,'0');
-  const year = d.getFullYear();
-  return `${day}/${month}/${year}`; 
+  const d = new Date();
+  return d.toLocaleDateString('en-GB'); // ให้รูปแบบ DD/MM/YYYY อัตโนมัติ ตรงเป๊ะ
 };
 
-// URL Encoding - รองรับภาษาไทย 100% ป้องกันลิงก์พัง
+// URL Compression (LZ-String) บีบอัดลิงก์ให้แชร์ได้ 100% ไม่พัง
 const encodeDataToURL = (dataObj) => {
-    try { return btoa(encodeURIComponent(JSON.stringify(dataObj))); } 
-    catch (e) { console.error(e); return ""; }
+    try {
+        const jsonStr = JSON.stringify(dataObj);
+        return LZString.compressToEncodedURIComponent(jsonStr);
+    } catch (e) {
+        console.error("Encode Error:", e);
+        return "";
+    }
 };
-const decodeDataFromURL = (base64Str) => {
-    try { return JSON.parse(decodeURIComponent(atob(base64Str))); } 
-    catch (e) { console.error(e); return null; }
+
+const decodeDataFromURL = (lzStr) => {
+    try {
+        const jsonStr = LZString.decompressFromEncodedURIComponent(lzStr);
+        return JSON.parse(jsonStr);
+    } catch (e) {
+        console.error("Decode Error:", e);
+        return null;
+    }
 };
 
 /* ═══════════════════════════════════════
@@ -934,7 +971,7 @@ function renderDocList(type) {
       <td style="font-family:var(--font-mono);font-weight:600">฿${money(doc.total)}</td>
       <td>${statusBadge(doc.status,type)}</td>
       <td><div style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm" onclick="previewDoc('${doc.id}')">ดู / PDF</button>
+        <button class="btn btn-ghost btn-sm" onclick="previewDoc('${doc.id}')">ดู / โหลด</button>
         <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="delDoc('${doc.id}')">ลบ</button>
       </div></td></tr>`;
   }).join('')||`<tr><td colspan="6"><div class="empty"><span class="empty-icon">📄</span><div class="empty-text">ยังไม่มีเอกสาร${m.title}</div></div></td></tr>`;
@@ -1423,8 +1460,8 @@ function openDocPreview(doc) {
     <div class="modal-ftr">
       <button class="btn btn-ghost" onclick="closeModal()">ปิด</button>
       ${!doc.isDraft
-        ?`<button class="btn btn-ghost" style="color:var(--accent-h);border-color:var(--accent)" onclick="shareDocOffline('${doc.id}')">🔗 แชร์ลิงก์ให้ลูกค้า</button>
-          <button id="btn-dl-pdf" class="btn btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="downloadPDF('${doc.id}')">📄 บันทึกเป็น PDF</button>
+        ?`<button class="btn btn-ghost" style="color:var(--accent-h);border-color:var(--accent)" onclick="shareDocOffline('${doc.id}')">🔗 สร้างลิงก์แชร์</button>
+          <button id="btn-dl-pdf" class="btn btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="downloadPDF('${doc.id}')">📄 โหลด PDF</button>
           <button class="btn btn-primary" onclick="printDoc('${doc.id}')">🖨️ พิมพ์</button>`
         :`<button class="btn" style="background:${m.hex};color:#fff" onclick="closeModal();saveDraft()">💾 บันทึก</button>`}
     </div>`,true);
@@ -1439,12 +1476,12 @@ function printDoc(id) {
 }
 
 /* ═══════════════════════════════════════
-   DOWNLOAD PDF FUNCTION (ใช้ฟังก์ชัน Print ของเครื่อง ดีที่สุดบนมือถือ)
+   DOWNLOAD PDF FUNCTION (รองรับมือถือ 100%)
 ═══════════════════════════════════════ */
 function downloadPDF(id) {
-  // การใช้ window.print() เป็นวิธีมาตรฐานที่เสถียรที่สุด 100% สำหรับการทำ PDF แบบไม่ผ่าน Server
-  // ผู้ใช้สามารถเลือก "บันทึกเป็น PDF" หรือ "Save as PDF" จากหน้าต่างพิมพ์ได้เลยทั้งบนมือถือและคอม
-  toast('กรุณาเลือก "บันทึกเป็น PDF" หรือ "Save as PDF" ในหน้าต่างที่จะปรากฏขึ้น', 'info');
+  // บนระบบมือถือเบราว์เซอร์ส่วนใหญ่จะรองรับการปริ้นเป็น PDF (Save as PDF) ทันที
+  // ซึ่งการสั่ง window.print() จะเสถียรที่สุด 100% ไม่มีปัญหาการแสดงผล
+  toast('กรุณาเลือก "บันทึกเป็น PDF" หรือ "Save as PDF" ในหน้าจอถัดไป', 'success');
   setTimeout(() => { printDoc(id); }, 1500);
 }
 
@@ -1459,7 +1496,7 @@ function showShareModal(url) {
     </div>
     <div class="modal-body" style="text-align:center; padding-top:10px;">
       <div style="background:var(--green-s); color:var(--green); padding:12px; border-radius:8px; margin-bottom:24px; font-size:13.5px; font-weight:600; text-align:left;">
-        ✅ สร้างลิงก์แชร์สำเร็จ! <br><span style="font-weight:400; color:var(--text-2);">ระบบฝังข้อมูลเอกสารลงในลิงก์แล้ว ลูกค้าเปิดดูบนมือถือและพิมพ์เป็น PDF ได้ทันที</span>
+        ✅ สร้างลิงก์แชร์สำเร็จ! <br><span style="font-weight:400; color:var(--text-2);">ระบบฝังข้อมูลเอกสารลงในลิงก์แล้ว ลูกค้าเปิดดูบนมือถือและบันทึก PDF ได้ทันที</span>
       </div>
       <div style="display:flex; gap:8px; margin-bottom:24px;">
         <input type="text" class="form-control" value="${url}" id="share-url-input" readonly style="background:#fff; color:#000; font-family:monospace; font-size:13px; padding: 10px;">
@@ -1487,12 +1524,12 @@ function shareToLine(url) {
   window.open(`https://line.me/R/msg/text/?${text}`, '_blank');
 }
 
-// เปลี่ยนมาใช้ Share Offline 100% ไม่พึ่ง Firebase เพื่อให้ลิงก์เปิดได้เสมอ
+// ใช้ Share Offline 100% (บีบอัดข้อมูลแบบ LZString ใส่ลิงก์โดยตรง ไม่ต้องผ่านฐานข้อมูล)
 function shareDocOffline(id) {
   const doc = DB.documents.find(d => d.id === id);
   if (!doc) return;
   const cus  = getCusFromDoc(doc);
-  // ตัดรูปภาพออกใน URL ป้องกันลิงก์ยาวเกินไป 
+  // ตัดรูปภาพออกใน URL ป้องกันลิงก์ยาวเกินไปและบัก (รูปภาพให้ลูกค้าดูแบบเนมเพลตแทน)
   const stripComp = { ...DB.settings, logo: '', signature: '', qrCode: '' }; 
 
   try {
@@ -1501,7 +1538,7 @@ function shareDocOffline(id) {
     const url = `${baseUrl}?pub=${encodedData}`;
     showShareModal(url);
   } catch(e) { 
-    toast('เอกสารมีรายละเอียดเยอะเกินไป กรุณาใช้การแชร์เป็น PDF แทน', 'warn'); 
+    toast('เอกสารมีรายละเอียดเยอะเกินไป กรุณาใช้การเซฟ PDF แทน', 'warn'); 
   }
 }
 
