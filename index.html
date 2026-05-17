@@ -6,35 +6,6 @@
 <title>BizFlow — ระบบบัญชีออนไลน์ (พร้อมใช้งาน)</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 
-<!-- Firebase CDN (compat mode) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics-compat.js"></script>
-
-<!-- html2pdf (สำหรับฟีเจอร์สร้างและดาวน์โหลด PDF) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-
-<script>
-  const firebaseConfig = {
-    apiKey: "AIzaSyA5l1QjPRMJEwTXedJFdK20nF7tr7sJuw4",
-    authDomain: "toeibill-5b980.firebaseapp.com",
-    projectId: "toeibill-5b980",
-    storageBucket: "toeibill-5b980.firebasestorage.app",
-    messagingSenderId: "192153937390",
-    appId: "1:192153937390:web:64084318710e94abe05aff",
-    measurementId: "G-XX08T7S22R"
-  };
-  var db = null;
-  try {
-    firebase.initializeApp(firebaseConfig);
-    db = firebase.firestore();
-    firebase.analytics();
-    console.log("Firebase connected");
-  } catch(e) {
-    console.log("Firebase Init Error (Offline mode fallback):", e);
-  }
-</script>
-
 <style>
 :root {
   --bg:         #0d0f14;
@@ -251,6 +222,8 @@ tbody tr:hover td { background:var(--subtle); }
 .toast { background:var(--card); border:1px solid var(--border); border-left:4px solid var(--green); padding:12px 18px; border-radius:10px; box-shadow:var(--shadow); display:flex; align-items:center; gap:10px; font-size:13px; font-weight:500; animation:slideIn .3s ease; color:var(--text); max-width:340px; pointer-events:all; }
 .toast.link { border-left-color:var(--accent); }
 .toast.warn { border-left-color:var(--yellow); }
+.toast.success { border-left-color:var(--green); }
+.toast.info { border-left-color:var(--blue); }
 
 /* ANIMATIONS */
 @keyframes fIn     { from{opacity:0} to{opacity:1} }
@@ -272,7 +245,6 @@ tbody tr:hover td { background:var(--subtle); }
 .a4-bg { background:#525659; }
 .a4-wrapper { width: 210mm; margin:0 auto; }
 
-/* เพิ่ม margin-bottom เพื่อไม่ให้หน้า 1 และหน้า 2 ติดกัน */
 .a4-page {
   width: 210mm;
   min-height: 297mm;
@@ -289,7 +261,7 @@ tbody tr:hover td { background:var(--subtle); }
   flex-direction: column;
   box-sizing: border-box;
   overflow: hidden;
-  margin-bottom: 24px; /* แยกหน้ากระดาษออกจากกัน */
+  margin-bottom: 24px;
 }
 
 /* Ribbon Triangle Top Right */
@@ -581,13 +553,29 @@ tbody tr:hover td { background:var(--subtle); }
 
 <script>
 /* ═══════════════════════════════════════
-   HELPERS
+   HELPERS & URL ENCODING (แก้บั๊กภาษาไทยใน URL)
 ═══════════════════════════════════════ */
-const utoa = s => btoa(unescape(encodeURIComponent(s)));
-const atou = s => decodeURIComponent(escape(atob(s)));
 const money = n => Number(n).toLocaleString('th-TH', {minimumFractionDigits:2, maximumFractionDigits:2});
 const genId = p => { const d = new Date(); return p + d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(Math.floor(Math.random()*1000)).padStart(3,'0'); };
-const todayStr = () => { const d = new Date(); return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; };
+
+// แก้ไขฟังก์ชันวันที่ให้แสดงตรงกับ Local Time เสมอ
+const todayStr = () => { 
+  const d = new Date(); 
+  const day = String(d.getDate()).padStart(2,'0');
+  const month = String(d.getMonth()+1).padStart(2,'0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`; 
+};
+
+// URL Encoding - รองรับภาษาไทย 100% ป้องกันลิงก์พัง
+const encodeDataToURL = (dataObj) => {
+    try { return btoa(encodeURIComponent(JSON.stringify(dataObj))); } 
+    catch (e) { console.error(e); return ""; }
+};
+const decodeDataFromURL = (base64Str) => {
+    try { return JSON.parse(decodeURIComponent(atob(base64Str))); } 
+    catch (e) { console.error(e); return null; }
+};
 
 /* ═══════════════════════════════════════
    NAV CONFIG
@@ -1435,8 +1423,8 @@ function openDocPreview(doc) {
     <div class="modal-ftr">
       <button class="btn btn-ghost" onclick="closeModal()">ปิด</button>
       ${!doc.isDraft
-        ?`<button class="btn btn-ghost" style="color:var(--accent-h);border-color:var(--accent)" onclick="shareDoc('${doc.id}')">🔗 แชร์ลิงก์</button>
-          <button id="btn-dl-pdf" class="btn btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="downloadPDF('${doc.id}')">📄 แชร์ / โหลด PDF</button>
+        ?`<button class="btn btn-ghost" style="color:var(--accent-h);border-color:var(--accent)" onclick="shareDocOffline('${doc.id}')">🔗 แชร์ลิงก์ให้ลูกค้า</button>
+          <button id="btn-dl-pdf" class="btn btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="downloadPDF('${doc.id}')">📄 บันทึกเป็น PDF</button>
           <button class="btn btn-primary" onclick="printDoc('${doc.id}')">🖨️ พิมพ์</button>`
         :`<button class="btn" style="background:${m.hex};color:#fff" onclick="closeModal();saveDraft()">💾 บันทึก</button>`}
     </div>`,true);
@@ -1451,93 +1439,17 @@ function printDoc(id) {
 }
 
 /* ═══════════════════════════════════════
-   DOWNLOAD PDF FUNCTION (html2pdf with CLEAN CSS)
+   DOWNLOAD PDF FUNCTION (ใช้ฟังก์ชัน Print ของเครื่อง ดีที่สุดบนมือถือ)
 ═══════════════════════════════════════ */
 function downloadPDF(id) {
-  const btn = document.getElementById('btn-dl-pdf');
-  if(btn) { btn.disabled = true; btn.innerHTML = '⏳ กำลังสร้าง...'; }
-
-  const doc = (DB.documents || []).find(d => d.id === id) || window.currentPubDoc;
-  if(!doc) {
-      if(btn) { btn.disabled = false; btn.innerHTML = '📄 แชร์ / โหลด PDF'; }
-      return;
-  }
-  toast('กำลังเตรียมไฟล์ PDF กรุณารอสักครู่...', 'warn');
-  
-  const cus = window.currentPubCus || null;
-  const comp = window.currentPubComp || null;
-  
-  // ซ่อน Temp Div เพื่อนำไปสร้าง PDF (ไม่ให้มี Shadow / ขอบดำรบกวน)
-  const tempDiv = document.createElement('div');
-  tempDiv.style.position = 'absolute';
-  tempDiv.style.left = '-9999px';
-  tempDiv.style.top = '0';
-  tempDiv.style.width = '210mm';
-  tempDiv.innerHTML = `<div class="pdf-export-wrap">${genA4HTML(doc, cus, comp)}</div>`;
-  document.body.appendChild(tempDiv);
-  
-  // Inject CSS เพื่อปลด Margin/Shadow เฉพาะตอนสร้าง PDF
-  const style = document.createElement('style');
-  style.innerHTML = `
-    .pdf-export-wrap .a4-page {
-        margin: 0 !important;
-        box-shadow: none !important;
-        border-radius: 0 !important;
-        transform: none !important;
-        page-break-after: always;
-    }
-    .pdf-export-wrap .a4-page:last-child {
-        page-break-after: auto;
-    }
-  `;
-  tempDiv.appendChild(style);
-
-  const opt = {
-    margin:       0,
-    filename:     `${doc.id}.pdf`,
-    image:        { type: 'jpeg', quality: 1 },
-    html2canvas:  { scale: 2, useCORS: true, windowWidth: 794 }, // 794px = 210mm
-    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-  };
-  
-  html2pdf().set(opt).from(tempDiv).output('blob').then(function(pdfBlob) {
-    document.body.removeChild(tempDiv);
-    if(btn) { btn.disabled = false; btn.innerHTML = '📄 แชร์ / โหลด PDF'; }
-    
-    const file = new File([pdfBlob], `${doc.id}.pdf`, { type: 'application/pdf' });
-    
-    // เรียกใช้เมนู Share ของมือถือ/PC (ส่งเข้า LINE/Messenger จากเครื่องได้ทันที)
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator.share({
-            title: `เอกสาร ${doc.id}`,
-            files: [file]
-        }).then(() => toast('แชร์ PDF สำเร็จ!', 'success')).catch((e) => {
-            saveBlobAsFile(pdfBlob, `${doc.id}.pdf`);
-        });
-    } else {
-        saveBlobAsFile(pdfBlob, `${doc.id}.pdf`);
-    }
-  }).catch(e => {
-      if(document.body.contains(tempDiv)) document.body.removeChild(tempDiv);
-      if(btn) { btn.disabled = false; btn.innerHTML = '📄 แชร์ / โหลด PDF'; }
-      toast('เกิดข้อผิดพลาดในการสร้าง PDF', 'warn');
-      console.error(e);
-  });
-}
-
-function saveBlobAsFile(blob, fileName) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    toast('ดาวน์โหลด PDF สำเร็จ!', 'success');
+  // การใช้ window.print() เป็นวิธีมาตรฐานที่เสถียรที่สุด 100% สำหรับการทำ PDF แบบไม่ผ่าน Server
+  // ผู้ใช้สามารถเลือก "บันทึกเป็น PDF" หรือ "Save as PDF" จากหน้าต่างพิมพ์ได้เลยทั้งบนมือถือและคอม
+  toast('กรุณาเลือก "บันทึกเป็น PDF" หรือ "Save as PDF" ในหน้าต่างที่จะปรากฏขึ้น', 'info');
+  setTimeout(() => { printDoc(id); }, 1500);
 }
 
 /* ═══════════════════════════════════════
-   SHARE LINK (FIRESTORE CLOUD SAVING + SHORT URL)
+   SHARE LINK (OFFLINE URL ENCODING - เปิดได้ 100%)
 ═══════════════════════════════════════ */
 function showShareModal(url) {
   openModal(`
@@ -1547,7 +1459,7 @@ function showShareModal(url) {
     </div>
     <div class="modal-body" style="text-align:center; padding-top:10px;">
       <div style="background:var(--green-s); color:var(--green); padding:12px; border-radius:8px; margin-bottom:24px; font-size:13.5px; font-weight:600; text-align:left;">
-        ✅ สร้างลิงก์สำเร็จ! <br><span style="font-weight:400; color:var(--text-2);">ลูกค้าเปิดดูเอกสารบนมือถือได้ทันที และสามารถดาวน์โหลดเป็น PDF หรือสั่งพิมพ์ได้เลย</span>
+        ✅ สร้างลิงก์แชร์สำเร็จ! <br><span style="font-weight:400; color:var(--text-2);">ระบบฝังข้อมูลเอกสารลงในลิงก์แล้ว ลูกค้าเปิดดูบนมือถือและพิมพ์เป็น PDF ได้ทันที</span>
       </div>
       <div style="display:flex; gap:8px; margin-bottom:24px;">
         <input type="text" class="form-control" value="${url}" id="share-url-input" readonly style="background:#fff; color:#000; font-family:monospace; font-size:13px; padding: 10px;">
@@ -1571,180 +1483,33 @@ function copyShareUrl() {
 }
 
 function shareToLine(url) {
-  const text = encodeURIComponent('เอกสารสำหรับคุณ สามารถเปิดดูและดาวน์โหลด PDF ได้ที่นี่: ' + url);
+  const text = encodeURIComponent('เอกสารสำหรับคุณ สามารถเปิดดูและดาวน์โหลด PDF ได้ที่นี่: \n\n' + url);
   window.open(`https://line.me/R/msg/text/?${text}`, '_blank');
 }
 
-function shareDoc(id) {
+// เปลี่ยนมาใช้ Share Offline 100% ไม่พึ่ง Firebase เพื่อให้ลิงก์เปิดได้เสมอ
+function shareDocOffline(id) {
   const doc = DB.documents.find(d => d.id === id);
   if (!doc) return;
   const cus  = getCusFromDoc(doc);
-  const comp = { ...DB.settings }; 
-  
-  // รหัสสุ่ม เพื่อให้ URL ไม่ยาวเกินไป
-  const randomStr = Math.random().toString(36).substring(2, 6);
-  const shareId = `${doc.id.toLowerCase().replace(/[^a-z0-9]/g, '')}-${randomStr}`;
-  const fsPayload = { doc, cus, comp, createdAt: Date.now() };
+  // ตัดรูปภาพออกใน URL ป้องกันลิงก์ยาวเกินไป 
+  const stripComp = { ...DB.settings, logo: '', signature: '', qrCode: '' }; 
 
-  toast('กำลังอัปโหลดเอกสารขึ้น Cloud...', 'warn');
-
-  if (db !== null) {
-    db.collection('shared_docs').doc(shareId).set(fsPayload)
-      .then(() => {
-        const baseUrl = window.location.href.split('?')[0].split('#')[0];
-        const url = `${baseUrl}?share=${shareId}`;
-        showShareModal(url);
-      })
-      .catch(err => {
-        console.error('Firestore save error:', err);
-        // Fallback เป็น URL แบบยาวกรณี Database มีปัญหา
-        const stripComp = { ...DB.settings, logo: '', signature: '', qrCode: '' }; 
-        fallbackShare(doc, cus, stripComp);
-      });
-  } else {
-    // โหมดออฟไลน์
-    const stripComp = { ...DB.settings, logo: '', signature: '', qrCode: '' }; 
-    fallbackShare(doc, cus, stripComp);
-  }
-}
-
-function fallbackShare(doc, cus, comp) {
   try {
     const baseUrl = window.location.href.split('?')[0].split('#')[0];
-    const url = `${baseUrl}?pub=${utoa(JSON.stringify({ doc, cus, comp }))}`;
+    const encodedData = encodeDataToURL({ doc, cus, comp: stripComp });
+    const url = `${baseUrl}?pub=${encodedData}`;
     showShareModal(url);
-  } catch(e) { toast('ไฟล์มีขนาดใหญ่เกินไป กรุณาใช้แชร์เป็น PDF แทน', 'warn'); }
-}
-
-/* ═══════════════════════════════════════
-   REPORTS
-═══════════════════════════════════════ */
-function renderReports() {
-  const paid=DB.documents.filter(d=>d.status==='paid').reduce((s,d)=>s+d.total,0);
-  const unpaid=DB.documents.filter(d=>d.status==='unpaid').reduce((s,d)=>s+d.total,0);
-  const qtCount=DB.documents.filter(d=>d.type==='QT').length;
-  const rows=[...DB.documents].reverse().map(d=>`
-    <tr>
-      <td>${DOC_META[d.type].title}</td>
-      <td style="font-family:var(--font-mono);font-size:12px">${d.id}</td>
-      <td>${getCusFromDoc(d).name.split('\n')[0]}</td>
-      <td>${d.date}</td>
-      <td style="font-family:var(--font-mono);font-weight:600">฿${money(d.total)}</td>
-      <td>${statusBadge(d.status,d.type)}</td>
-    </tr>`).join('')||`<tr><td colspan="6"><div class="empty"><span class="empty-icon">📊</span><div class="empty-text">ยังไม่มีข้อมูล</div></div></td></tr>`;
-  return `
-  <div class="g3 fu">
-    <div class="card" style="margin-bottom:0"><div class="kpi-label">รายได้ที่รับแล้ว (YTD)</div><div class="kpi-value" style="color:var(--green)">฿${money(paid)}</div></div>
-    <div class="card" style="margin-bottom:0"><div class="kpi-label">ยอดค้างรับ (AR)</div><div class="kpi-value" style="color:var(--yellow)">฿${money(unpaid)}</div></div>
-    <div class="card" style="margin-bottom:0"><div class="kpi-label">ใบเสนอราคาทั้งหมด</div><div class="kpi-value" style="color:var(--teal)">${qtCount} ใบ</div></div>
-  </div>
-  <div class="card fu1">
-    <span class="sec-title">รายการเอกสารทั้งหมด</span>
-    <div class="tbl-wrap" style="margin-bottom:0">
-      <table><thead><tr><th>ประเภท</th><th>เลขที่</th><th>ลูกค้า</th><th>วันที่</th><th>ยอดสุทธิ</th><th>สถานะ</th></tr></thead><tbody>${rows}</tbody></table>
-    </div>
-  </div>`;
-}
-
-/* ═══════════════════════════════════════
-   LINE OA
-═══════════════════════════════════════ */
-function renderLine() {
-  return `
-  <div class="g2 fu">
-    <div class="card">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
-        <div style="width:40px;height:40px;border-radius:12px;background:var(--green-s);display:flex;align-items:center;justify-content:center;font-size:20px">💬</div>
-        <div><div style="font-weight:700">LINE OA Automation</div><div style="font-size:12px;color:var(--green)">● เชื่อมต่อแล้ว</div></div>
-      </div>
-      ${[['Channel ID','@bizflow_th'],['Webhook URL','https://api.bizflow.app/webhook']].map(([k,v])=>`
-        <div style="padding:10px 0;border-bottom:1px solid var(--border)">
-          <div style="font-size:11px;font-weight:700;color:var(--text-3);margin-bottom:4px;text-transform:uppercase">${k}</div>
-          <div style="font-size:13px;color:var(--accent-h)">${v}</div>
-        </div>`).join('')}
-      <div style="margin-top:16px"><label style="display:flex;justify-content:space-between;align-items:center;font-size:13px"><span>แจ้งเตือนเมื่อออกบิลใหม่</span><input type="checkbox" checked></label></div>
-    </div>
-  </div>`;
-}
-
-/* ═══════════════════════════════════════
-   SETTINGS
-═══════════════════════════════════════ */
-function renderSettings() {
-  const s = DB.settings;
-  return `
-  <div class="g2 fu">
-    <div class="card">
-      <span class="sec-title">🏢 ข้อมูลบริษัท</span>
-      <div class="g2" style="margin-bottom:0">
-        <div class="form-group">
-          <label class="form-label">โลโก้บริษัท</label>
-          ${s.logo?`<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px;margin-bottom:8px"><img id="logo-prev" src="${s.logo}" style="width:100%;height:56px;object-fit:contain"></div>`:`<div id="logo-prev-wrap"></div>`}
-          <input type="file" accept="image/*" class="form-control" style="padding:8px;font-size:11.5px" onchange="uploadImg(this,'logo','logo-prev')">
-        </div>
-        <div class="form-group">
-          <label class="form-label">ลายเซ็น</label>
-          ${s.signature?`<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px;margin-bottom:8px"><img id="sig-prev" src="${s.signature}" style="width:100%;height:56px;object-fit:contain"></div>`:`<div id="sig-prev-wrap"></div>`}
-          <input type="file" accept="image/*" class="form-control" style="padding:8px;font-size:11.5px" onchange="uploadImg(this,'sig','sig-prev')">
-        </div>
-      </div>
-      <div class="form-group"><label class="form-label">ชื่อบริษัท / ร้านค้า</label><input id="s-name" class="form-control" value="${s.companyName}"></div>
-      <div class="form-group"><label class="form-label">เลขผู้เสียภาษี</label><input id="s-tax" class="form-control" value="${s.taxId}"></div>
-      <div class="form-group"><label class="form-label">ที่อยู่</label><textarea id="s-addr" class="form-control" rows="3">${s.address}</textarea></div>
-      <div class="form-group"><label class="form-label">ชื่อผู้ออกเอกสาร</label><input id="s-issuer" class="form-control" value="${s.issuerName}"></div>
-    </div>
-    <div>
-      <div class="card">
-        <span class="sec-title">🏦 ข้อมูลธนาคาร & QR Code</span>
-        <div class="form-group">
-          <label class="form-label">QR Code รับเงิน</label>
-          ${s.qrCode?`<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px;width:100px;margin-bottom:8px"><img id="qr-prev" src="${s.qrCode}" style="width:100%;height:90px;object-fit:contain"></div>`:`<div id="qr-prev-wrap"></div>`}
-          <input type="file" accept="image/*" class="form-control" style="padding:8px;font-size:11.5px" onchange="uploadImg(this,'qr','qr-prev')">
-        </div>
-        <div class="g2" style="margin-bottom:0">
-          <div class="form-group"><label class="form-label">ชื่อธนาคาร</label><input id="s-bname" class="form-control" value="${s.bankName}"></div>
-          <div class="form-group"><label class="form-label">เลขบัญชี</label><input id="s-bacc" class="form-control" value="${s.bankAcc}"></div>
-          <div class="form-group"><label class="form-label">สาขา</label><input id="s-bbranch" class="form-control" value="${s.bankBranch}"></div>
-          <div class="form-group"><label class="form-label">ชื่อบัญชี</label><input id="s-bowner" class="form-control" value="${s.bankOwner}"></div>
-        </div>
-      </div>
-      <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center" onclick="saveSettings()">💾 บันทึกการตั้งค่า</button>
-    </div>
-  </div>`;
-}
-
-function uploadImg(input, key, imgId) {
-  if(!input.files || !input.files[0]) return;
-  const r = new FileReader();
-  r.onload = e => {
-    DB.settings[key === 'logo' ? 'logo' : key === 'sig' ? 'signature' : 'qrCode'] = e.target.result;
-    let el = document.getElementById(imgId);
-    if(!el){
-      const wrap = document.getElementById(imgId + '-wrap');
-      if(wrap) wrap.innerHTML = `<div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px;margin-bottom:8px"><img id="${imgId}" src="${e.target.result}" style="width:100%;height:56px;object-fit:contain"></div>`;
-    } else { el.src = e.target.result; }
-  };
-  r.readAsDataURL(input.files[0]);
-}
-
-function saveSettings() {
-  const s = DB.settings;
-  s.companyName = document.getElementById('s-name').value;
-  s.taxId = document.getElementById('s-tax').value;
-  s.address = document.getElementById('s-addr').value;
-  s.issuerName = document.getElementById('s-issuer').value;
-  s.bankName = document.getElementById('s-bname').value;
-  s.bankAcc = document.getElementById('s-bacc').value;
-  s.bankBranch = document.getElementById('s-bbranch').value;
-  s.bankOwner = document.getElementById('s-bowner').value;
-  saveDB(); toast('บันทึกการตั้งค่าแล้ว', 'success'); renderNav();
+  } catch(e) { 
+    toast('เอกสารมีรายละเอียดเยอะเกินไป กรุณาใช้การแชร์เป็น PDF แทน', 'warn'); 
+  }
 }
 
 /* ═══════════════════════════════════════
 PUBLIC VIEWER (Web View for Customer)
 ═══════════════════════════════════════ */
 function showPublicViewer(data) {
-  if (!data) { document.body.innerHTML = `<div style="padding:60px;text-align:center;font-family:'IBM Plex Sans Thai',sans-serif;color:#666"><h2>⚠️ ไม่พบเอกสาร</h2><p>ลิงก์นี้อาจหมดอายุหรือไม่ถูกต้อง กรุณาติดต่อผู้ส่งเอกสาร</p></div>`; return; }
+  if (!data) { document.body.innerHTML = `<div style="padding:60px;text-align:center;font-family:'IBM Plex Sans Thai',sans-serif;color:#666"><h2>⚠️ ลิงก์เอกสารไม่ถูกต้อง</h2><p>ลิงก์อาจถูกตัดหรือมีปัญหาในการคัดลอก กรุณาติดต่อผู้ส่งเอกสารใหม่อีกครั้ง</p></div>`; return; }
   const { doc, cus, comp } = data;
   
   // เก็บ State ไว้ให้ฟังก์ชัน Print และ Download PDF ดึงไปใช้
@@ -1755,18 +1520,16 @@ function showPublicViewer(data) {
   document.body.classList.add('light');
   document.body.style.overflow = 'auto';
   document.getElementById('app-root').style.display = 'none';
-  const loading = document.getElementById('share-loading');
-  if (loading) loading.remove();
 
   const brandHtml = comp.logo ? `<img src="${comp.logo}">` : `<div class="pub-brand-text">${comp.companyName}</div>`;
   const actionHtml = doc.status === 'unpaid' 
     ? `<div style="display:flex; gap:10px; width: 100%;">
-         <button id="btn-dl-pdf" class="pub-btn-primary" onclick="downloadPDF('${doc.id}')" style="background:#14b8a6; color:#fff; flex:1; justify-content:center; white-space:nowrap;">📄 โหลด PDF</button>
+         <button class="pub-btn-primary" onclick="downloadPDF('${doc.id}')" style="background:#14b8a6; color:#fff; flex:1; justify-content:center; white-space:nowrap;">📄 โหลด PDF</button>
          <button class="pub-btn-primary" onclick="printDoc('${doc.id}')" style="background:#0f172a; color:#fff; flex:1; justify-content:center; white-space:nowrap;">🖨️ พิมพ์</button>
        </div>` 
     : `<div style="display:flex; align-items:center; gap:15px; flex-wrap:wrap; justify-content:center;">
          <div style="color:#22c55e;font-weight:700;font-size:15px; background:#f0fdf4; padding:8px 16px; border-radius:8px; border:1px solid #bbf7d0; white-space:nowrap;">ชำระเงินแล้ว ✓</div>
-         <button id="btn-dl-pdf" class="pub-btn-primary" onclick="downloadPDF('${doc.id}')" style="background:#14b8a6; color:#fff; white-space:nowrap;">📄 โหลด PDF</button>
+         <button class="pub-btn-primary" onclick="downloadPDF('${doc.id}')" style="background:#14b8a6; color:#fff; white-space:nowrap;">📄 โหลด PDF</button>
          <button class="pub-btn-primary" onclick="printDoc('${doc.id}')" style="background:#0f172a; color:#fff; white-space:nowrap;">🖨️ พิมพ์</button>
        </div>`;
 
@@ -1781,18 +1544,18 @@ function showPublicViewer(data) {
 }
 
 /* ─── Detect share/pub params ─── */
-const _shareId = new URLSearchParams(location.search).get('share');
-const _pub     = new URLSearchParams(location.search).get('pub');
+const _pub = new URLSearchParams(location.search).get('pub');
 
-if (_shareId) {
-  document.getElementById('app-root').style.display = 'none';
-  document.body.insertAdjacentHTML('beforeend', `<div class="share-loading" id="share-loading"> <div class="share-loading-inner"> <div class="share-loading-spinner"></div> <div>กำลังโหลดเอกสาร...</div> </div> </div>`);
-  if (db !== null) {
-    db.collection('shared_docs').doc(_shareId).get().then(snap => { showPublicViewer(snap.exists ? snap.data() : null); }).catch(err => { console.error('Firestore load error:', err); showPublicViewer(null); });
-  } else { showPublicViewer(null); }
-} else if (_pub) {
-  try { showPublicViewer(JSON.parse(atou(_pub))); } catch { document.body.innerHTML = `<div style="padding:60px;text-align:center;font-family:'IBM Plex Sans Thai',sans-serif;color:#666"><h2>⚠️ ลิงก์ไม่ถูกต้อง</h2><p>กรุณาติดต่อผู้ส่งเอกสาร</p></div>`; }
-} else { setPage('dashboard'); }
+if (_pub) {
+  try { 
+      const data = decodeDataFromURL(_pub);
+      showPublicViewer(data); 
+  } catch { 
+      document.body.innerHTML = `<div style="padding:60px;text-align:center;font-family:'IBM Plex Sans Thai',sans-serif;color:#666"><h2>⚠️ ลิงก์ไม่ถูกต้อง หรือถูกดัดแปลง</h2><p>กรุณาตรวจสอบลิงก์อีกครั้ง</p></div>`; 
+  }
+} else { 
+    setPage('dashboard'); 
+}
 </script>
 
 </body>
