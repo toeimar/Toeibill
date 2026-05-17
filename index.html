@@ -606,16 +606,14 @@ tbody tr:hover td { background:var(--subtle); }
 const money = n => Number(n).toLocaleString('th-TH', {minimumFractionDigits:2, maximumFractionDigits:2});
 const genId = p => { const d = new Date(); return p + d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(Math.floor(Math.random()*1000)).padStart(3,'0'); };
 
-// แก้ไขฟังก์ชันวันที่ให้อิงตามเครื่องเป๊ะๆ ไม่คลาดเคลื่อน
 const todayStr = () => { 
   const d = new Date();
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear(); // เช่น 2026
+  const year = d.getFullYear(); 
   return `${day}/${month}/${year}`; 
 };
 
-// ใช้ LZ-String สำหรับบีบอัดข้อมูลแบบแข็งแกร่ง เปิดใน URL ได้ 100%
 const encodeDataToURL = (dataObj) => {
     try {
         const jsonStr = JSON.stringify(dataObj);
@@ -637,20 +635,23 @@ const decodeDataFromURL = (lzStr) => {
 };
 
 /* ═══════════════════════════════════════
-   SHORT URL API (สร้างลิงก์สั้นผ่าน TinyURL)
+   SHORT URL API
 ═══════════════════════════════════════ */
 async function shortenUrl(longUrl) {
     try {
-        // ใช้ API จาก TinyURL เพื่อให้ได้ลิงก์ที่สั้นกริบและไม่โดนบล็อก
-        const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`);
+        const urlToFetch = `https://is.gd/create.php?format=simple&url=${encodeURIComponent(longUrl)}`;
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(urlToFetch)}`;
+        const res = await fetch(proxyUrl);
         if(res.ok) {
-            const text = await res.text();
-            if(text && text.startsWith('http')) return text;
+            const data = await res.json();
+            if(data && data.contents && data.contents.startsWith('http')) {
+                return data.contents.trim();
+            }
         }
     } catch(e) {
-        console.error('TinyURL Error', e);
+        console.error('Shorten URL Error', e);
     }
-    return longUrl; // หากดึงไม่สำเร็จ จะแสดงลิงก์แบบยาวเป็น Fallback
+    return longUrl; 
 }
 
 /* ═══════════════════════════════════════
@@ -699,6 +700,7 @@ const DEFAULT_DB = {
     bankName:'ธ. กรุงศรีอยุธยา', bankAcc:'584-1-30161-3',
     bankBranch:'สาขา อโศก', bankOwner:'บจก. เอไอ บิสสิเนส',
     issuerName:'รุจิรา กิจรักษา',
+    paymentNote:'* กรุณาโอนเงินภายในวันที่ {due_date} และแจ้งยืนยันการชำระ'
   },
   customers:[
     { id:'C001', name:'บริษัท สถาพร พรีเมี่ยม คอนสตรัคชั่น จำกัด (สำนักงานใหญ่)\nSATAPON PREMIUM CONSTRUCTION CO. LTD.', email:'contact@example.com', taxId:'010-556-816-842-2', phone:'096-906-9256', address:'ที่อยู่ 151/18 ซอยพหลโยธิน 34\nแขวงเสนานิคม เขตจตุจักร กรุงเทพมหานคร' }
@@ -717,6 +719,7 @@ let DB = (() => {
     if (!raw) return JSON.parse(JSON.stringify(DEFAULT_DB));
     const p = JSON.parse(raw);
     if (!p.settings.issuerName) p.settings.issuerName = DEFAULT_DB.settings.issuerName;
+    if (p.settings.paymentNote === undefined) p.settings.paymentNote = DEFAULT_DB.settings.paymentNote;
     return p;
   } catch { return JSON.parse(JSON.stringify(DEFAULT_DB)); }
 })();
@@ -847,7 +850,6 @@ function renderNav() {
   if (s.logo) { img.src=s.logo; img.style.display='block'; letter.style.display='none'; }
   else { img.style.display='none'; letter.style.display=''; letter.textContent=(s.companyName||'B').charAt(0).toUpperCase(); }
 
-  // Mobile Bottom Nav Badge Update
   document.querySelectorAll('.bn-item').forEach(el=>el.classList.remove('active'));
   const activeBtn = document.querySelector(`.bn-item[onclick="setPage('${currentPage}')"]`);
   if(activeBtn) activeBtn.classList.add('active');
@@ -1268,7 +1270,7 @@ function saveDraft() {
 function delDoc(id) { customConfirm('คุณต้องการลบเอกสารนี้ถาวรใช่หรือไม่?', () => { const type=DB.documents.find(d=>d.id===id)?.type; DB.documents=DB.documents.filter(d=>d.id!==id); saveDB(); setPage(`docs-${type}`); }); }
 
 /* ═══════════════════════════════════════
-   A4 RENDERER (FLOWACCOUNT STYLE 100% + FULL FEATURES)
+   A4 RENDERER
 ═══════════════════════════════════════ */
 function genA4HTML(doc, customCus, customComp) {
   const m = DOC_META[doc.type];
@@ -1299,6 +1301,11 @@ function genA4HTML(doc, customCus, customComp) {
       <td style="text-align:center;">${whtText}</td>
       <td style="text-align:right; font-family:'IBM Plex Mono',monospace;">${money(it.qty*it.price-it.discount)}</td>
     </tr>`).join('');
+
+  // ใช้หมายเหตุการโอนที่กำหนดเอง ถ้าไม่มีให้ใช้ค่าเริ่มต้น
+  const defaultNote = '* กรุณาโอนเงินภายในวันที่ {due_date} และแจ้งยืนยันการชำระ';
+  let rawNote = comp.paymentNote !== undefined ? comp.paymentNote : defaultNote;
+  let finalNote = rawNote.replace(/{due_date}/g, doc.due || '-');
 
   const page1 = `
   <div class="a4-page">
@@ -1472,7 +1479,7 @@ function genA4HTML(doc, customCus, customComp) {
         </div>
         <div class="a4-qr-wrap">${qrHtml}</div>
       </div>
-      <div style="font-size:9.5pt;color:#94a3b8;margin-top:10px">* กรุณาโอนเงินภายในวันที่ ${doc.due||'-'} และแจ้งยืนยันการชำระ</div>
+      <div style="font-size:9.5pt;color:#94a3b8;margin-top:10px">${finalNote.replace(/\n/g, '<br>')}</div>
     </div>
     <div style="flex-grow:1"></div>
     <div class="a4-footer-sys"><strong>AI BUSINESS & LINE OA AUTOMATION</strong></div>
@@ -1499,8 +1506,8 @@ function openDocPreview(doc) {
     <div class="modal-ftr">
       <button class="btn btn-ghost" onclick="closeModal()">ปิด</button>
       ${!doc.isDraft
-        ?`<button class="btn btn-ghost" style="color:var(--accent-h);border-color:var(--accent)" onclick="shareDoc('${doc.id}')">🔗 สร้างลิงก์แชร์</button>
-          <button id="btn-dl-pdf" class="btn btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="downloadPDF('${doc.id}')">📄 โหลด PDF</button>
+        ?`<button class="btn btn-ghost" style="color:var(--accent-h);border-color:var(--accent)" onclick="shareDoc('${doc.id}')">🔗 สร้างลิงก์แชร์สั้น</button>
+          <button id="btn-dl-pdf" class="btn btn-ghost" style="color:var(--red);border-color:var(--red)" onclick="downloadPDF('${doc.id}')">📄 บันทึกเป็น PDF</button>
           <button class="btn btn-primary" onclick="printDoc('${doc.id}')">🖨️ พิมพ์</button>`
         :`<button class="btn" style="background:${m.hex};color:#fff" onclick="closeModal();saveDraft()">💾 บันทึก</button>`}
     </div>`,true);
@@ -1515,7 +1522,7 @@ function printDoc(id) {
 }
 
 /* ═══════════════════════════════════════
-   DOWNLOAD PDF FUNCTION (รองรับมือถือ 100%)
+   DOWNLOAD PDF FUNCTION
 ═══════════════════════════════════════ */
 function downloadPDF(id) {
   const btn = document.getElementById('btn-dl-pdf');
@@ -1523,7 +1530,7 @@ function downloadPDF(id) {
 
   const doc = (DB.documents || []).find(d => d.id === id) || window.currentPubDoc;
   if(!doc) {
-      if(btn) { btn.disabled = false; btn.innerHTML = '📄 โหลด PDF'; }
+      if(btn) { btn.disabled = false; btn.innerHTML = '📄 บันทึกเป็น PDF'; }
       return;
   }
   toast('กำลังเตรียมไฟล์ PDF กรุณารอสักครู่...', 'warn');
@@ -1531,7 +1538,6 @@ function downloadPDF(id) {
   const cus = window.currentPubCus || null;
   const comp = window.currentPubComp || null;
   
-  // ซ่อน DOM พิเศษเพื่อเรนเดอร์ PDF
   const tempDiv = document.createElement('div');
   tempDiv.style.position = 'absolute';
   tempDiv.style.left = '-9999px';
@@ -1559,18 +1565,17 @@ function downloadPDF(id) {
     margin:       0,
     filename:     `${doc.id}.pdf`,
     image:        { type: 'jpeg', quality: 1 },
-    html2canvas:  { scale: 2, useCORS: true, windowWidth: 794 }, // A4 width
+    html2canvas:  { scale: 2, useCORS: true, windowWidth: 794 },
     jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
   };
   
-  // สร้างไฟล์ PDF เป็น Blob 
   html2pdf().set(opt).from(tempDiv).output('blob').then(async function(pdfBlob) {
     document.body.removeChild(tempDiv);
-    if(btn) { btn.disabled = false; btn.innerHTML = '📄 โหลด PDF'; }
+    if(btn) { btn.disabled = false; btn.innerHTML = '📄 บันทึกเป็น PDF'; }
     
     const file = new File([pdfBlob], `${doc.id}.pdf`, { type: 'application/pdf' });
     
-    // ตรวจสอบ WebView เพื่อป้องกันการแชร์ไม่สำเร็จบนแอป LINE/Facebook
+    // ตรวจสอบว่าเป็นแอปเบราว์เซอร์ภายใน Line / FB หรือไม่
     const isWebView = /Line|FBAN|FBAV|Instagram/i.test(navigator.userAgent);
     
     try {
@@ -1581,17 +1586,19 @@ function downloadPDF(id) {
             });
             toast('แชร์ PDF สำเร็จ!', 'success');
         } else {
-            throw new Error("Share not supported or in WebView");
+            throw new Error("Share not supported");
         }
     } catch (err) {
-        // หากแชร์ไม่ได้ ให้บังคับดาวน์โหลดเปิดแท็บใหม่แทน
         if (err.name !== 'AbortError') {
+            if (isWebView) {
+                alert("⚠️ คุณกำลังใช้งานผ่านแอปพลิเคชัน (เช่น LINE)\nระบบอาจปิดกั้นการดาวน์โหลด PDF\n\n👉 กรุณากดเมนูมุมขวาบน เลือก 'เปิดในเบราว์เซอร์เริ่มต้น' (Open in Browser) เพื่อโหลดไฟล์อีกครั้ง");
+            }
             saveBlobAsFile(pdfBlob, `${doc.id}.pdf`);
         }
     }
   }).catch(e => {
       if(document.body.contains(tempDiv)) document.body.removeChild(tempDiv);
-      if(btn) { btn.disabled = false; btn.innerHTML = '📄 โหลด PDF'; }
+      if(btn) { btn.disabled = false; btn.innerHTML = '📄 บันทึกเป็น PDF'; }
       toast('เกิดข้อผิดพลาดในการสร้าง PDF', 'warn');
   });
 }
@@ -1608,11 +1615,11 @@ function saveBlobAsFile(blob, fileName) {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     }, 100);
-    toast('ดาวน์โหลด PDF ลงเครื่องสำเร็จ! (สามารถกดแชร์ต่อจากไฟล์ที่โหลดได้เลย)', 'success');
+    toast('ดาวน์โหลด PDF ลงเครื่องสำเร็จ!', 'success');
 }
 
 /* ═══════════════════════════════════════
-   SHARE LINK (เชื่อม Cloud + ย่อลิงก์ TinyURL)
+   SHARE LINK
 ═══════════════════════════════════════ */
 function showShareModal(url) {
   openModal(`
@@ -1622,7 +1629,7 @@ function showShareModal(url) {
     </div>
     <div class="modal-body" style="text-align:center; padding-top:10px;">
       <div style="background:var(--green-s); color:var(--green); padding:12px; border-radius:8px; margin-bottom:24px; font-size:13.5px; font-weight:600; text-align:left;">
-        ✅ สร้างลิงก์แชร์สำเร็จ! โลโก้และลายเซ็นมาครบ<br><span style="font-weight:400; color:var(--text-2);">ลูกค้าสามารถเปิดลิงก์นี้บนมือถือ และดาวน์โหลด PDF ได้ด้วยตนเอง</span>
+        ✅ สร้างลิงก์แชร์สำเร็จ!<br><span style="font-weight:400; color:var(--text-2);">ลูกค้าสามารถคลิกลิงก์นี้เพื่อเปิดดูเอกสาร และโหลดเป็น PDF ได้ทันที</span>
       </div>
       <div style="display:flex; gap:8px; margin-bottom:24px;">
         <input type="text" class="form-control" value="${url}" id="share-url-input" readonly style="background:#fff; color:#000; font-family:monospace; font-size:13px; padding: 10px;">
@@ -1654,12 +1661,12 @@ async function shareDoc(id) {
   const doc = DB.documents.find(d => d.id === id);
   if (!doc) return;
   const cus  = getCusFromDoc(doc);
-  const comp = { ...DB.settings }; // เก็บโลโก้ ลายเซ็นต์ QR แบบเต็มๆ
+  const comp = { ...DB.settings }; 
 
   toast('กำลังอัปโหลดเอกสารขึ้นระบบ กรุณารอสักครู่...', 'warn');
   const baseUrl = window.location.href.split('?')[0].split('#')[0];
 
-  // 1. เขียนลง Firebase ตามสิทธิ์ Canvas เพื่อให้ได้ลิงก์สั้นและภาพครบถ้วน 100%
+  // ลองเขียนลง Firebase เพื่อให้ได้ลิงก์สั้นก่อน
   if (db !== null && auth && auth.currentUser) {
     try {
       const randomStr = Math.random().toString(36).substring(2, 6);
@@ -1676,10 +1683,12 @@ async function shareDoc(id) {
     }
   }
 
-  // 2. แผนสำรองแบบแข็งแกร่ง (กรณี Cloud มีปัญหา)
+  // หาก Firebase เออเร่อ ใช้ลิงก์บีบอัดแล้วไปย่อผ่าน is.gd ให้สั้น
   try {
     const encodedData = encodeDataToURL({ doc, cus, comp });
     const longUrl = `${baseUrl}?pub=${encodedData}`;
+    
+    toast('กำลังสร้างลิงก์สั้น...', 'warn');
     const shortUrl = await shortenUrl(longUrl);
     showShareModal(shortUrl);
   } catch(e) { 
@@ -1726,6 +1735,10 @@ function renderSettings() {
           <div class="form-group"><label class="form-label">เลขบัญชี</label><input id="s-bacc" class="form-control" value="${s.bankAcc}"></div>
           <div class="form-group"><label class="form-label">สาขา</label><input id="s-bbranch" class="form-control" value="${s.bankBranch}"></div>
           <div class="form-group"><label class="form-label">ชื่อบัญชี</label><input id="s-bowner" class="form-control" value="${s.bankOwner}"></div>
+        </div>
+        <div class="form-group" style="margin-top:14px;">
+          <label class="form-label">หมายเหตุการโอนเงิน <span style="font-weight:400;color:var(--text-3)">(พิมพ์ {due_date} เพื่อแทรกวันครบกำหนดอัตโนมัติ)</span></label>
+          <textarea id="s-payment-note" class="form-control" rows="2">${s.paymentNote !== undefined ? s.paymentNote : '* กรุณาโอนเงินภายในวันที่ {due_date} และแจ้งยืนยันการชำระ'}</textarea>
         </div>
       </div>
       <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center" onclick="saveSettings()">💾 บันทึกการตั้งค่า</button>
@@ -1777,6 +1790,7 @@ function saveSettings() {
   s.bankAcc = document.getElementById('s-bacc').value;
   s.bankBranch = document.getElementById('s-bbranch').value;
   s.bankOwner = document.getElementById('s-bowner').value;
+  s.paymentNote = document.getElementById('s-payment-note').value;
   saveDB(); toast('บันทึกการตั้งค่าแล้ว', 'success'); renderNav();
 }
 
@@ -1787,7 +1801,6 @@ function showPublicViewer(data) {
   if (!data) { document.body.innerHTML = `<div style="padding:60px;text-align:center;font-family:'IBM Plex Sans Thai',sans-serif;color:#666"><h2>⚠️ ลิงก์เอกสารไม่ถูกต้อง</h2><p>ลิงก์อาจถูกตัดหรือหมดอายุ กรุณาติดต่อผู้ส่งเอกสารอีกครั้ง</p></div>`; return; }
   const { doc, cus, comp } = data;
   
-  // เก็บ State ไว้ให้ฟังก์ชัน Print และ Download PDF ดึงไปใช้
   window.currentPubDoc = doc;
   window.currentPubCus = cus;
   window.currentPubComp = comp;
@@ -1823,12 +1836,11 @@ const _shareId = new URLSearchParams(location.search).get('share');
 const _pub = new URLSearchParams(location.search).get('pub');
 
 if (_shareId) {
-  // ดึงจาก Firebase
   document.getElementById('app-root').style.display = 'none';
   document.body.insertAdjacentHTML('beforeend', `<div class="share-loading" id="share-loading"> <div class="share-loading-inner"> <div class="share-loading-spinner"></div> <div>กำลังโหลดเอกสาร...</div> </div> </div>`);
   
   const loadSharedDoc = () => {
-     if (db !== null) {
+     if (db !== null && auth && auth.currentUser) {
          const docPath = `artifacts/${appId}/public/data/shared_docs`;
          db.collection(docPath).doc(_shareId).get().then(snap => {
              showPublicViewer(snap.exists ? snap.data() : null);
@@ -1840,7 +1852,6 @@ if (_shareId) {
       }
   };
 
-  // รอ Auth ให้เสร็จก่อนจึงจะดึงข้อมูล
   if (auth && !auth.currentUser) {
       window.pendingShareId = _shareId;
       const unsubscribe = auth.onAuthStateChanged((user) => {
@@ -1851,7 +1862,6 @@ if (_shareId) {
   } else { showPublicViewer(null); }
 
 } else if (_pub) {
-  // ดึงจาก URL ล้วน
   try { 
       const data = decodeDataFromURL(_pub);
       showPublicViewer(data); 
