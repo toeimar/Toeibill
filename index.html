@@ -39,15 +39,32 @@
 
     // เริ่มต้นระบบยืนยันตัวตน เพื่อปลดล็อกสิทธิ์ให้สามารถเซฟลิงก์แชร์ลง Cloud ได้สำเร็จ
     const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await auth.signInWithCustomToken(__initial_auth_token);
-        } else {
-          await auth.signInAnonymously();
-        }
-      } catch(e) { console.log('Auth Error', e); }
-    };
-    initAuth();
+  try {
+    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+      await auth.signInWithCustomToken(__initial_auth_token);
+    } else {
+      await auth.signInAnonymously();
+    }
+    // โหลดข้อมูลจาก Cloud ทันทีหลัง login สำเร็จ
+    const uid = auth.currentUser?.uid;
+    if (uid && db) {
+      const snap = await db.collection(`artifacts/${appId}/users`).doc(uid).get();
+      if (snap.exists && snap.data().data) {
+        try {
+          const cloudDB = JSON.parse(snap.data().data);
+          // ใช้ข้อมูล Cloud ถ้าใหม่กว่า หรือยังไม่มีในเครื่อง
+          const localRaw = localStorage.getItem('bizflow_v27');
+          const localDB = localRaw ? JSON.parse(localRaw) : null;
+          if (!localDB || (snap.data().updatedAt > (localDB._savedAt || 0))) {
+            DB = cloudDB;
+            localStorage.setItem('bizflow_v27', JSON.stringify(DB));
+          }
+        } catch(e) { console.warn('Cloud load parse error:', e); }
+      }
+    }
+  } catch(e) { console.log('Auth Error', e); }
+};
+initAuth();
 
   } catch(e) {
     console.log("Firebase Init Error (Offline mode fallback):", e);
@@ -499,7 +516,7 @@ tbody tr:hover td { background:var(--subtle); }
 
   .toasts { left: 12px; right: 12px; bottom: 72px; }
   .toast { max-width: 100%; font-size: 12.5px; }
-
+  
   .form-control { padding: 11px 12px; font-size: 15px; }
   .btn { min-height: 42px; }
   .btn-sm { min-height: 36px; }
@@ -723,7 +740,15 @@ let DB = (() => {
     return p;
   } catch { return JSON.parse(JSON.stringify(DEFAULT_DB)); }
 })();
-const saveDB = () => localStorage.setItem('bizflow_v27', JSON.stringify(DB));
+const saveDB = () => {
+  localStorage.setItem('bizflow_v27', JSON.stringify(DB));
+  if (db !== null && auth && auth.currentUser) {
+    const uid = auth.currentUser.uid;
+    db.collection(`artifacts/${appId}/users`).doc(uid)
+      .set({ data: JSON.stringify(DB), updatedAt: Date.now() })
+      .catch(e => console.warn('Firestore save error:', e));
+  }
+};
 
 /* ═══════════════════════════════════════
    THEME
